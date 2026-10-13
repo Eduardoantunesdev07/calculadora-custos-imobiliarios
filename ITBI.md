@@ -1,6 +1,6 @@
 # Padroes do ITBI
 
-O calculo padrao e automatico, usando os dados da operacao. A aba ITBI permite mudar para valor informado manualmente. O resumo, os indicadores e a impressao usam o mesmo valor considerado. Trocar o municipio limpa ajustes manuais e o enquadramento de Curitiba.
+O calculo padrao e automatico, usando os dados da operacao. A aba ITBI permite mudar para valor informado manualmente. O resumo, os indicadores e a impressao usam o mesmo valor considerado. Trocar o municipio limpa ajustes manuais.
 
 ## Padroes fornecidos pela RTx em 13/10/2026
 
@@ -22,14 +22,14 @@ Exemplo do usuario: compra R$ 700.000, financiamento R$ 500.000, FGTS R$ 50.000,
 
 Fontes consultadas em 13/10/2026: [LC 148/2025, art. 1, alteracao do art. 11](https://legisladocexterno.curitiba.pr.gov.br/VisualizarHTML.aspx?id=454104) e [LC 108/2017, art. 9](https://mid.curitiba.pr.gov.br/2018/00217721.pdf).
 
-Para imovel residencial edificado, financiado por pelo menos 10 anos e com garantia hipotecaria ou alienacao fiduciaria, a aliquota unica depende do valor venal total:
+A pedido da RTx em 13/10/2026, o estimador sempre aplica as faixas abaixo, sem pergunta de enquadramento e independentemente do financiamento:
 
 - Ate R$ 176.000: 0%.
 - De R$ 176.000,01 ate R$ 205.000: 0,5%.
 - De R$ 205.000,01 ate R$ 220.000: 1,6%.
-- Fora dessas faixas ou condicoes: regra geral de 2,7%.
+- A partir de R$ 220.000,01: 2,7%.
 
-O usuario confirma o enquadramento na aba ITBI. Sem confirmacao, imovel financiado dentro das faixas reduzidas fica pendente, inclusive na faixa de isencao: nao presumimos imposto zero. Compra a vista ou valor acima de R$ 220 mil usam a regra geral. Outras isencoes especiais, como COHAB, nao sao modeladas; usar o valor manual quando aplicavel.
+Esse e um padrao comercial da estimativa, nao uma afirmacao de que a reducao legal seja incondicional. A [Prefeitura de Curitiba](https://www.curitiba.pr.gov.br/servicos/itbi-base-de-calculo-e-aliquotas/administracao-regional-pinheirinho/512) exige imovel residencial edificado, financiamento de pelo menos 10 anos e garantia hipotecaria ou alienacao fiduciaria para as faixas reduzidas. A observacao continua visivel, mas nao bloqueia o calculo solicitado. Isencoes especiais e guias oficiais podem exigir ajuste manual.
 
 O valor venal pode ser informado nessa aba. Sem esse dado, o valor de compra e usado somente como referencia da estimativa, com observacao no detalhamento. A aliquota incide sobre a base inteira, sem progressividade; nao segue a separacao de parcelas de financiamento/FGTS usada no RS nem subtrai subsidio do valor venal.
 

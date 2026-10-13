@@ -103,13 +103,33 @@ test("PR: garantia a 50%, prenotacao e taxas desconhecidas pendentes", () => {
   assert.equal(result.total, 179440);
   assert.equal(result.selos, null);
   assert.equal(result.completo, false);
-  assert.equal(result.pendencias.length, 3);
-  const completed = calcularRegistro(operation({ uf: "PR", selosPR: 1000, fundosPR: 20000 }));
+  assert.equal(result.pendencias.length, 4);
+  const completed = calcularRegistro(operation({ uf: "PR", selosPR: 1000, fundosPR: 20000, funrejusPR: 0 }));
   assert.equal(completed.total, 209879);
   assert.equal(completed.completo, true);
-  const sfh = calcularRegistro(operation({ uf: "PR", sfh: true, selosPR: 0, fundosPR: 0, issPercentual: 0 }));
+  const sfh = calcularRegistro(operation({ uf: "PR", sfh: true, selosPR: 0, fundosPR: 0, funrejusPR: 0, issPercentual: 0 }));
   assert.equal(sfh.prenotacao, 139);
   assert.equal(sfh.total, 89721);
+});
+
+test("FUNREJUS: despesa separada somada uma vez, sem desconto SFH automatico", () => {
+  const input=operation({uf:"PR",selosPR:1000,fundosPR:2000,funrejusPR:40000,issPercentual:0});
+  const result=calcularRegistro(input);
+  assert.equal(result.funrejus,40000);
+  assert.equal(result.total,222440);
+  assert.equal(result.completo,true);
+  assert.equal(result.linhas.filter(line=>line.descricao==="FUNREJUS (valor informado)").length,1);
+  assert.equal(result.linhas.reduce((sum,line)=>sum+line.subtotal,0),result.subtotal);
+  assert.equal(calcularRegistro({...input,sfh:true}).funrejus,40000);
+  const unknown=calcularRegistro({...input,funrejusPR:null});
+  assert.equal(unknown.total,182440);
+  assert.equal(unknown.completo,false);
+  assert.deepEqual(unknown.pendencias,["FUNREJUS"]);
+  const exempt=calcularRegistro({...input,funrejusPR:0});
+  assert.equal(exempt.completo,true);
+  assert.equal(exempt.funrejus,0);
+  for(const value of [-1,1.5,NaN]) assert.throws(()=>calcularRegistro({...input,funrejusPR:value}));
+  assert.equal(calcularRegistro(operation({funrejusPR:40000})).total,221162);
 });
 
 test("Dados ausentes, outros atos e tabelas vencidas ficam pendentes", () => {
@@ -119,6 +139,139 @@ test("Dados ausentes, outros atos e tabelas vencidas ficam pendentes", () => {
     assert.equal(result.completo, false);
   }
   assert.equal(calcularRegistro(operation({data:new Date(2026,11,31)})).total,221162);
+});
+
+test("Curitiba: padrao calcula selos, FUNDEP, FUNREJUS e ISS sem valores manuais", () => {
+  const input=operation({uf:"PR",municipio:"Curitiba",referenciaPR:"tjpr",issPercentual:null});
+  const result=calcularRegistro(input);
+  assert.equal(result.emolumentos,179634);
+  assert.equal(result.selos,1650);
+  assert.equal(result.fundos,8982);
+  assert.equal(result.funrejus,40000);
+  assert.equal(result.issPercentual,5);
+  assert.equal(result.iss,8982);
+  assert.equal(result.total,239366);
+  assert.equal(result.completo,true);
+  assert.equal(result.tetoFunrejus,806925);
+  assert.equal(result.linhas.reduce((sum,line)=>sum+line.subtotal,0)+result.iss+result.funrejus,result.total);
+  const cash=calcularRegistro({...input,divida:0});
+  assert.equal(cash.selos,850);
+  assert.equal(cash.completo,true);
+  const discounted=calcularRegistro({...input,sfh:true});
+  assert.equal(discounted.total,140509);
+  assert.equal(discounted.funrejus,40000);
+  assert.equal(discounted.selos,1650);
+});
+
+test("Curitiba: teto do FUNREJUS, UPF vencida e ajuste confirmado", () => {
+  const input=operation({uf:"PR",municipio:"Curitiba",referenciaPR:"tjpr",issPercentual:null});
+  assert.equal(calcularRegistro({...input,base:403462500}).funrejus,806925);
+  assert.equal(calcularRegistro({...input,base:403463000}).funrejus,806925);
+  assert.equal(calcularRegistro({...input,base:400000000}).funrejus,800000);
+  const next=calcularRegistro({...input,data:new Date(2026,10,1)});
+  assert.equal(next.funrejus,null);
+  assert.equal(next.completo,false);
+  assert.match(next.pendencias.join(" "),/UPF/);
+  assert.equal(calcularRegistro({...input,data:new Date(2026,10,1),funrejusPR:40000}).completo,true);
+  const zero=calcularRegistro({...input,selosPR:0,fundosPR:0,funrejusPR:0,issPercentual:0});
+  assert.equal(zero.total,179752);
+  assert.equal(zero.completo,true);
+  const adjusted=calcularRegistro({...input,selosPR:1000,fundosPR:2000,funrejusPR:30000,issPercentual:7});
+  assert.equal(adjusted.total,225326);
+  assert.ok(adjusted.linhas.some(line=>line.descricao==="FUNDEP (total ajustado)"));
+});
+
+test("Referencia do cartorio: cada coluna e total de R$ 2.695,31", () => {
+  const result=calcularRegistro(operation({uf:"PR",municipio:"Curitiba",issPercentual:null,emolCompraPR:137724,emolGarantiaPR:68862}));
+  assert.deepEqual(result.linhas.map(line=>[line.emolumento,line.fundep,line.selo,line.taxa,line.subtotal]),[
+    [137724,6886,800,0,145410],
+    [68862,3443,800,0,73105],
+    [277,14,25,69,385],
+    [194,10,25,49,278]
+  ]);
+  assert.equal(result.emolumentos,207057);
+  assert.equal(result.fundos,10353);
+  assert.equal(result.selos,1650);
+  assert.equal(result.taxaJudiciaria,118);
+  assert.equal(result.subtotal,219178);
+  assert.equal(result.funrejus,40000);
+  assert.equal(result.iss,10353);
+  assert.equal(result.total,269531);
+  assert.equal(result.completo,true);
+  assert.equal(result.linhas.reduce((sum,line)=>sum+line.subtotal,0),result.subtotal);
+  for(const value of [-1,1.5,NaN]) assert.throws(()=>calcularRegistro(operation({uf:"PR",municipio:"Curitiba",emolCompraPR:value})));
+});
+
+test("RIB automatico: consultas externas verificadas e comparacao com TJPR", () => {
+  for (const [base,compra,garantia] of [[10000,34902,17451],[15512,34902,17451],[15512.01,41134,20567],[20000,47367,23684],[50000,113348,56674],[56000,125536,62768],[58000,131630,65815],[60000,137724,68862],[100000,137724,68862],[200000,137724,68862]]) {
+    const result=calcularRegistro(operation({uf:"PR",municipio:"Curitiba",base:Math.round(base*100),divida:100000,issPercentual:null}));
+    assert.equal(result.compra,compra,String(base));
+    assert.equal(result.garantia,garantia,String(base));
+    assert.equal(result.referenciaRIB,true);
+  }
+  const input=operation({uf:"PR",municipio:"Curitiba",issPercentual:null});
+  assert.equal(calcularRegistro(input).total,269531);
+  assert.equal(calcularRegistro({...input,referenciaPR:"tjpr"}).total,239366);
+  assert.throws(()=>calcularRegistro({...input,referenciaPR:"outro"}));
+});
+
+test("Pagina: seleciona RIB ou TJPR sem perder a operacao e sem consulta externa", () => {
+  const p=page("automatico");p.set("uf","PR","change");
+  assert.equal(p.elements.registro.value,"2.695,31");
+  p.set("registro-referencia-pr","tjpr","change");
+  assert.equal(p.elements.registro.value,"2.393,66");
+  p.set("registro-referencia-pr","rib","change");
+  assert.equal(p.elements.registro.value,"2.695,31");
+  p.set("financiado",1000);
+  assert.equal(p.elements.registro.value,"2.695,31");
+  assert.equal(p.calculate(),true);
+  assert.match(p.elements["registro-observacao"].textContent,/50% do emolumento da compra/);
+  assert.equal(p.elements["registro-fonte-resumo"].href,"https://www.registrodeimoveis.org.br/calculadora");
+});
+
+test("Referencia na pagina: seis colunas, resumo e impressao com mesmo total", () => {
+  const p=page("automatico");p.set("uf","PR","change");
+  p.set("registro-emol-compra-pr","1.377,24");p.set("registro-emol-garantia-pr","688,62");
+  assert.equal(p.calculate(),true);
+  const money=value=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value);
+  assert.equal(p.elements.registro.value,"2.695,31");
+  assert.equal(p.elements["registro-total"].textContent,money(2695.31));
+  assert.equal(p.elements["registro-subtotal"].textContent,money(2191.78));
+  assert.equal(p.elements["registro-taxa-total"].textContent,money(1.18));
+  assert.equal(p.elements["registro-fundep-total"].textContent,money(103.53));
+  assert.equal(p.elements["registro-linhas"].children.length,4);
+  assert.equal(p.elements["registro-linhas"].children[0].children.length,6);
+  assert.equal(p.elements["registro-iss-label"].attributes.colspan,"5");
+  assert.equal(p.elements["registro-funrejus-row"].hidden,false);
+  p.elements.imprimir.listeners.click();assert.equal(p.prints(),1);
+  assert.equal(p.elements.total.textContent,money(7295.31));
+  p.set("uf","RS","change");assert.equal(p.calculate(),true);
+  assert.equal(p.elements["registro-emol-compra-pr"].value,"");
+  assert.equal(p.elements["registro-emol-garantia-pr"].value,"");
+  assert.equal(p.elements["registro-fundep-col"].hidden,true);
+  assert.equal(p.elements["registro-funrejus-row"].hidden,true);
+  assert.equal(p.elements["registro-iss-label"].attributes.colspan,"3");
+  assert.equal(p.elements["registro-linhas"].children[0].children.length,4);
+});
+
+test("Curitiba na pagina: total completo automatico, ajustes e troca de municipio", () => {
+  const p=page("automatico");p.set("uf","PR","change");
+  assert.equal(p.elements.registro.value,"2.695,31");
+  assert.equal(p.elements["registro-iss"].value,"5");
+  assert.equal(p.elements.itbi.value,"1.000,00");
+  assert.equal(p.calculate(),true);
+  assert.equal(p.elements["total-label"].textContent,"Total estimado");
+  assert.equal(p.elements.pendencias.textContent,"");
+  assert.equal(p.elements.total.textContent,new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(7295.31));
+  p.set("registro-funrejus-pr",0);p.set("registro-selos-pr",0);p.set("registro-fundos-pr",0);p.set("registro-iss",0);
+  assert.equal(p.elements.registro.value,"2.071,75");
+  p.set("registro-funrejus-pr","");p.set("registro-selos-pr","");p.set("registro-fundos-pr","");p.set("registro-iss","");
+  assert.equal(p.elements.registro.value,"2.695,31");
+  p.set("uf","RS","change");p.set("municipio","Canoas","change");
+  assert.equal(p.elements["registro-iss"].value,"");
+  assert.equal(p.elements.registro.value,"2.109,40");
+  assert.equal(p.calculate(),true);
+  assert.match(p.elements.pendencias.textContent,/ISS/);
 });
 
 test("Rejeita valores e percentuais invalidos", () => {
@@ -300,9 +453,9 @@ test("Pagina: desconto SFH pode ser marcado e desmarcado em RS e PR", () => {
   p.set("uf","PR","change");
   assert.equal(p.elements.municipio.value,"Curitiba");
   p.check("registro-sfh",true);
-  assert.equal(p.elements.registro.value,"897,21");
+  assert.equal(p.elements.registro.value,"1.555,91");
   p.check("registro-sfh",false);
-  assert.equal(p.elements.registro.value,"1.794,40");
+  assert.equal(p.elements.registro.value,"2.695,31");
 });
 
 test("Pagina: taxa bancaria, despachante e modo manual continuam funcionando", () => {
@@ -426,15 +579,14 @@ test("ITBI Curitiba: fronteiras das faixas, sem progressividade", () => {
   }
 });
 
-test("ITBI Curitiba: condicoes pendentes, nao atendidas, compra a vista e valor venal", () => {
+test("ITBI Curitiba: faixas sempre automaticas, inclusive compra a vista", () => {
   const curitiba=itbiOperation({uf:"PR",municipio:"Curitiba",compra:20000000,financiado:16000000,fgts:0,subsidio:0});
-  assert.equal(calcularITBI(curitiba).total,null);
-  assert.equal(calcularITBI({...curitiba,enquadramento:false}).total,540000);
-  assert.equal(calcularITBI({...curitiba,financiado:0}).total,540000);
+  assert.equal(calcularITBI(curitiba).total,100000);
+  assert.equal(calcularITBI({...curitiba,financiado:0}).total,100000);
   assert.equal(calcularITBI({...curitiba,enquadramento:true}).total,100000);
   assert.equal(calcularITBI({...curitiba,enquadramento:true,valorVenal:21000000}).total,336000);
   assert.equal(calcularITBI({...curitiba,compra:30000000}).total,810000);
-  assert.throws(()=>calcularITBI({...curitiba,financiado:0,enquadramento:true}));
+  assert.equal(calcularITBI({...curitiba,financiado:0,compra:17600000}).total,0);
 });
 
 test("ITBI: ausencia e valores invalidos nao geram zero", () => {
@@ -467,17 +619,48 @@ test("ITBI manual: guarda ajuste da operacao e limpa valor ao trocar municipio",
   p.set("municipio","Canoas","change");assert.equal(p.elements.itbi.value,"");
 });
 
-test("ITBI Curitiba: isencao confirmada e pendencia aparecem corretamente", () => {
+test("ITBI Curitiba: aplica faixas sem pergunta de confirmacao", () => {
   const p=page("automatico");p.set("uf","PR","change");
   assert.equal(p.elements["itbi-curitiba"].hidden,false);
-  assert.equal(p.elements.itbi.value,"");
+  assert.equal(p.elements.itbi.value,"1.000,00");
+  assert.equal(p.elements["itbi-enquadramento"],undefined);
   assert.equal(p.calculate(),true);
-  assert.match(p.elements.pendencias.textContent,/ITBI/);
-  p.set("itbi-enquadramento","sim","change");assert.equal(p.elements.itbi.value,"1.000,00");
+  assert.doesNotMatch(p.elements.pendencias.textContent,/ITBI/);
   p.set("compra",176000);p.set("financiado",140000);p.set("fgts",0);p.set("subsidio",0);
   assert.equal(p.elements.itbi.value,"0,00");assert.equal(p.calculate(),true);
   assert.doesNotMatch(p.elements.pendencias.textContent,/ITBI/);
   p.set("itbi-venal",0);assert.equal(p.calculate(),false);
   assert.equal(p.elements["pane-itbi"].hidden,false);
   assert.equal(p.elements["itbi-venal"].focused,true);
+});
+
+test("Curitiba: FUNREJUS automatico, ajustado e isento no registro e no resumo", () => {
+  const p=page("automatico");p.set("uf","PR","change");
+  p.set("registro-selos-pr",10);p.set("registro-fundos-pr",20);p.set("registro-iss",0);
+  assert.equal(p.calculate(),true);
+  assert.doesNotMatch(p.elements.pendencias.textContent,/FUNREJUS/);
+  assert.equal(p.elements["registro-funrejus-total"].textContent,new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(400));
+  p.set("registro-funrejus-pr","400,00");
+  assert.equal(p.elements["registro-funrejus-pr"].type,"text");
+  assert.equal(p.calculate(),true);
+  assert.equal(p.elements.registro.value,"2.501,75");
+  assert.doesNotMatch(p.elements.pendencias.textContent,/FUNREJUS/);
+  const money=value=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value);
+  assert.equal(p.elements["registro-funrejus-total"].textContent,money(400));
+  assert.equal(p.elements.total.textContent,money(7101.75));
+  p.elements.imprimir.listeners.click();assert.equal(p.prints(),1);
+  assert.equal(p.elements.total.textContent,money(7101.75));
+  p.set("registro-funrejus-pr",0);assert.equal(p.calculate(),true);
+  assert.equal(p.elements.registro.value,"2.101,75");
+  assert.doesNotMatch(p.elements.pendencias.textContent,/FUNREJUS/);
+  p.set("registro-funrejus-pr",-1);assert.equal(p.calculate(),false);
+  assert.equal(p.elements["pane-registro"].hidden,false);
+  assert.equal(p.elements["registro-ajustes"].open,true);
+  p.set("registro-funrejus-pr",400);
+  p.set("registro-modo","manual","change");p.set("registro",3000);
+  assert.equal(p.calculate(),true);
+  assert.equal(p.elements.total.textContent,money(7600));
+  p.set("uf","RS","change");
+  assert.equal(p.elements["registro-funrejus-pr"].value,"");
+  assert.equal(p.elements["registro-ajustes-pr"].hidden,true);
 });

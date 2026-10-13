@@ -102,6 +102,8 @@ a { color: #fa98a3; }
 .registration-table tbody th { font-weight: 400; }
 .registration-table thead { background: #2d2727; color: #ddd1d1; }
 .registration-table thead th:not(:first-child) { width: 19%; }
+.registration-table.detailed-pr { min-width: 860px; }
+.registration-table.detailed-pr thead th:not(:first-child) { width: 14%; }
 .subtotals { font-weight: 600; }
 .registry-total { background: #322225; color: #ffb3bc; font-weight: 600; font-size: 14px; }
 .registration-table tfoot th[colspan] { text-align: right; }

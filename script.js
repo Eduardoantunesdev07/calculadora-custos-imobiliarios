@@ -40,7 +40,7 @@ function impostoEmCentavos(base, aliquotaBP) {
   return Number((BigInt(base) * BigInt(aliquotaBP) + 5000n) / 10000n);
 }
 
-function calcularITBI({ uf, municipio, compra, financiado, fgts, subsidio, valorVenal = null, enquadramento = null }) {
+function calcularITBI({ uf, municipio, compra, financiado, fgts, subsidio, valorVenal = null }) {
   const key = `${uf}/${municipio}`;
   const profile = ITBI_PADROES[key];
   if (!profile && key !== "PR/Curitiba") throw new Error("Não há padrão de ITBI para este município.");
@@ -70,27 +70,18 @@ function calcularITBI({ uf, municipio, compra, financiado, fgts, subsidio, valor
     add("Recursos próprios", proprios, profile.proprios);
   } else {
     if (valorVenal !== null && (!Number.isSafeInteger(valorVenal) || valorVenal <= 0)) throw new Error("O valor venal deve ser maior que zero.");
-    if (![null, true, false].includes(enquadramento)) throw new Error("Confirme o enquadramento do imóvel em Curitiba.");
     const base = valorVenal ?? compra;
-    if (base <= 22000000 && financiado > 0 && enquadramento === null) {
-      return { total: null, linhas: [{ descricao: "Valor venal / base de referência", base, aliquotaBP: null, imposto: null }],
-        proprios, subsidio, profile: null, base, motivo: "Confirme se a operação atende às condições da alíquota reduzida de Curitiba." };
-    }
-    if (enquadramento === true && financiado === 0) throw new Error("A alíquota reduzida de Curitiba exige financiamento bancário.");
     let aliquota = 270;
-    if (enquadramento === true && financiado > 0) {
-      if (base <= 17600000) aliquota = 0;
-      else if (base <= 20500000) aliquota = 50;
-      else if (base <= 22000000) aliquota = 160;
-    }
+    if (base <= 17600000) aliquota = 0;
+    else if (base <= 20500000) aliquota = 50;
+    else if (base <= 22000000) aliquota = 160;
     add("Valor venal / base de referência", base, aliquota);
   }
   const total = linhas.reduce((sum, line) => sum + line.imposto, 0);
   if (!Number.isSafeInteger(total)) throw new Error("O ITBI excede o limite de cálculo.");
   return { total, linhas, proprios, subsidio, excedente, profile,
     motivo: profile ? "Padrão de estimativa informado pela RTx. Subsídio excluído da base de recursos próprios."
-      : valorVenal === null ? "Estimativa de Curitiba usando o valor de compra como referência do valor venal. Confirme a base municipal."
-      : "Estimativa de Curitiba sobre o valor venal informado, conforme o enquadramento selecionado." };
+      : `Padrão RTx de Curitiba: faixas aplicadas automaticamente, sem confirmação de enquadramento. Base: ${valorVenal === null ? "valor de compra como referência" : "valor venal informado"}. Estimativa, não guia municipal.` };
 }
 
 // Valores em reais transcritos das tabelas oficiais. Atualização: veja REGISTRO.md.
@@ -130,6 +121,15 @@ const REGISTRO_TABELAS = {
   }
 };
 
+// Referencia observada no formulario publico RIB em 13/10/2026; nao substitui a Tabela XIII.
+const REGISTRO_REFERENCIA_RIB = {
+  ...REGISTRO_TABELAS.PR,
+  versao: "Referência calculadora RIB, PR, conferida em 13/10/2026",
+  fonte: "https://www.registrodeimoveis.org.br/calculadora",
+  teto: 1377.24,
+  faixas: [...REGISTRO_TABELAS.PR.faixas, [57062.00, 1255.36], [59832.00, 1316.30], [62602.00, 1377.24]]
+};
+
 function emolumentoPorFaixa(uf, baseCentavos) {
   const table = REGISTRO_TABELAS[uf];
   if (!table || !Number.isSafeInteger(baseCentavos) || baseCentavos <= 0) {
@@ -145,6 +145,11 @@ const SELOS_RS = {
   teto: 100.20
 };
 const ISS_INFORMADO = { "RS/Porto Alegre": 5.26 };
+const CURITIBA_REGISTRO = {
+  iss: 5, fundepBP: 500, funrejusBP: 20,
+  seloRegistro: 800, seloPequeno: 100, seloPrenotacao: 25,
+  upfPorMes: { "2026-10": 15225 }, multiplicadorTeto: 53
+};
 
 function seloRS(baseCentavos, emolumentoOriginal) {
   const faixas = emolumentoOriginal <= 7000 ? SELOS_RS.pequenos : SELOS_RS.atos;
@@ -153,9 +158,13 @@ function seloRS(baseCentavos, emolumentoOriginal) {
   return Math.round((faixa ? faixa[1] : SELOS_RS.teto) * 100);
 }
 
-function calcularRegistro({ uf, base, divida, sfh = false, issPercentual = null,
-  seloCompra = null, seloGarantia = null, selosPR = null, fundosPR = null, contrato = "urbano", data = new Date() }) {
-  const table = REGISTRO_TABELAS[uf];
+function calcularRegistro({ uf, municipio = null, base, divida, sfh = false, issPercentual = null, referenciaPR = "rib",
+  seloCompra = null, seloGarantia = null, selosPR = null, fundosPR = null, funrejusPR = null,
+  emolCompraPR = null, emolGarantiaPR = null, contrato = "urbano", data = new Date() }) {
+  const padraoCuritiba = uf === "PR" && municipio === "Curitiba";
+  if (padraoCuritiba && !["rib", "tjpr"].includes(referenciaPR)) throw new Error("Selecione uma referência válida para os emolumentos.");
+  const referenciaRIB = padraoCuritiba && referenciaPR === "rib";
+  const table = referenciaRIB ? REGISTRO_REFERENCIA_RIB : REGISTRO_TABELAS[uf];
   if (!table) throw new Error("Não há tabela cadastrada para este estado.");
   const pending = (reason) => ({ total: null, completo: false, motivo: reason, pendencias: ["Registro"], tabela: table, linhas: [] });
   const today = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(data.getDate()).padStart(2, "0")}`;
@@ -165,17 +174,35 @@ function calcularRegistro({ uf, base, divida, sfh = false, issPercentual = null,
   if (!Number.isSafeInteger(base) || base <= 0 || !Number.isSafeInteger(divida) || divida < 0 || divida > base) throw new Error("A base deve ser positiva e a dívida deve estar entre zero e a base de cálculo.");
   if (sfh && divida === 0) throw new Error("1ª aquisição SFH exige financiamento. Confira o enquadramento da operação.");
   if (issPercentual !== null && (!Number.isFinite(issPercentual) || issPercentual < 0 || issPercentual > 100)) throw new Error("O percentual de ISS deve estar entre 0 e 100.");
-  for (const valor of [seloCompra, seloGarantia, selosPR, fundosPR]) {
+  for (const valor of [seloCompra, seloGarantia, selosPR, fundosPR, funrejusPR, emolCompraPR, emolGarantiaPR]) {
     if (valor !== null && (!Number.isSafeInteger(valor) || valor < 0)) throw new Error("Informe taxas válidas em reais, com até duas casas decimais.");
   }
   const desconto = sfh ? 50 : 0;
   const factor = (100 - desconto) / 100;
-  const compra = Math.round(emolumentoPorFaixa(uf, base) * factor);
-  const garantia = divida === 0 ? 0 : Math.round(emolumentoPorFaixa(uf, divida) * table.fatorGarantia * factor);
+  const faixaRIB = table.faixas.find(([limit]) => base <= Math.round(limit * 100));
+  const compraIntegral = padraoCuritiba && emolCompraPR !== null ? emolCompraPR : referenciaRIB
+    ? Math.round((faixaRIB ? faixaRIB[1] : table.teto) * 100) : emolumentoPorFaixa(uf, base);
+  const compra = Math.round(compraIntegral * factor);
+  const garantia = divida === 0 ? 0 : Math.round((padraoCuritiba && emolGarantiaPR !== null ? emolGarantiaPR
+    : referenciaRIB ? compraIntegral * 0.5 : emolumentoPorFaixa(uf, divida) * table.fatorGarantia) * factor);
   const quantidade = divida === 0 ? 1 : 2;
   const processamento = uf === "RS" ? quantidade * Math.round(730 * factor) : 0;
   const prenotacao = uf === "PR" ? Math.round(277 * factor) : 0;
-  const emolumentos = compra + garantia + processamento + prenotacao;
+  const arquivamento = padraoCuritiba ? Math.round(194 * factor) : 0;
+  const emolumentos = compra + garantia + processamento + prenotacao + arquivamento;
+  const selosAjustados = selosPR !== null;
+  const fundosAjustados = fundosPR !== null;
+  const funrejusAjustado = funrejusPR !== null;
+  let tetoFunrejus = null;
+  if (padraoCuritiba) {
+    const upf = CURITIBA_REGISTRO.upfPorMes[today.slice(0, 7)];
+    tetoFunrejus = upf === undefined ? null : upf * CURITIBA_REGISTRO.multiplicadorTeto;
+    const selo = (valor) => valor > 3200 ? CURITIBA_REGISTRO.seloRegistro : CURITIBA_REGISTRO.seloPequeno;
+    selosPR ??= selo(compra) + (divida > 0 ? selo(garantia) : 0) + 2 * CURITIBA_REGISTRO.seloPrenotacao;
+    fundosPR ??= [compra, garantia, prenotacao, arquivamento].reduce((sum, valor) => sum + impostoEmCentavos(valor, CURITIBA_REGISTRO.fundepBP), 0);
+    if (funrejusPR === null && tetoFunrejus !== null) funrejusPR = Math.min(impostoEmCentavos(base, CURITIBA_REGISTRO.funrejusBP), tetoFunrejus);
+    issPercentual ??= CURITIBA_REGISTRO.iss;
+  }
   const pendencias = [];
   const linhas = [];
   function add(descricao, emolumento, selo, subtotal, agrupado = false) {
@@ -183,6 +210,7 @@ function calcularRegistro({ uf, base, divida, sfh = false, issPercentual = null,
   }
   let selos;
   let fundos = 0;
+  let taxaJudiciaria = 0;
   if (uf === "RS") {
     const seloDaCompra = seloCompra ?? seloRS(base, emolumentoPorFaixa(uf, base));
     const seloDaGarantia = divida === 0 ? 0 : (seloGarantia ?? seloRS(divida, emolumentoPorFaixa(uf, divida)));
@@ -190,24 +218,45 @@ function calcularRegistro({ uf, base, divida, sfh = false, issPercentual = null,
     if (divida > 0) add("Registro da garantia" + (seloGarantia === null ? "" : " (selo ajustado)"), garantia, seloDaGarantia, garantia + seloDaGarantia);
     add(`Processamento eletrônico de dados (${quantidade}×)`, processamento, quantidade * 220, processamento + quantidade * 220);
     selos = seloDaCompra + seloDaGarantia + quantidade * 220;
+  } else if (padraoCuritiba) {
+    const selo = (valor) => valor > 3200 ? CURITIBA_REGISTRO.seloRegistro : CURITIBA_REGISTRO.seloPequeno;
+    const ato = (descricao, emolumento, seloValor, taxaBP = 0) => {
+      const fundep = fundosAjustados ? 0 : impostoEmCentavos(emolumento, CURITIBA_REGISTRO.fundepBP);
+      const seloAto = selosAjustados ? 0 : seloValor;
+      const taxa = impostoEmCentavos(emolumento, taxaBP);
+      taxaJudiciaria += taxa;
+      linhas.push({ descricao, emolumento, fundep, selo: seloAto, taxa, subtotal: emolumento + fundep + seloAto + taxa });
+    };
+    ato("Registro da compra e venda" + (emolCompraPR === null ? "" : " (emolumento ajustado)"), compra, selo(compra));
+    if (divida > 0) ato("Registro da garantia" + (emolGarantiaPR === null ? "" : " (emolumento ajustado)"), garantia, selo(garantia));
+    ato("Prenotação", prenotacao, 25, 2500);
+    ato("Arquivamento", arquivamento, 25, 2500);
+    if (selosAjustados) linhas.push({ descricao: "Selos FUNARPEN (total ajustado)", emolumento: 0, fundep: 0, selo: selosPR, taxa: 0, subtotal: selosPR });
+    if (fundosAjustados) linhas.push({ descricao: "FUNDEP (total ajustado)", emolumento: 0, fundep: fundosPR, selo: 0, taxa: 0, subtotal: fundosPR });
+    selos = selosPR;
+    fundos = fundosPR;
+    if (funrejusPR === null) pendencias.push("FUNREJUS: atualizar UPF/PR do mês ou informar a guia");
   } else {
     add("Registro da compra e venda", compra, null, compra, true);
     if (divida > 0) add("Registro da garantia", garantia, null, garantia, true);
     add("Prenotação do título", prenotacao, null, prenotacao, true);
-    add("Selos de fiscalização (total informado)", 0, selosPR, selosPR);
-    add("Fundos e taxas do cartório", 0, 0, fundosPR);
+    add(padraoCuritiba ? selosAjustados ? "Selos FUNARPEN (total ajustado)" : `Selos FUNARPEN (${quantidade} registro(s) + 1 prenotação)` : "Selos de fiscalização (total informado)", 0, selosPR, selosPR);
+    add(padraoCuritiba && !funrejusAjustado ? "FUNREJUS (0,2% sobre a compra, com teto)" : "FUNREJUS (valor informado)", 0, 0, funrejusPR);
+    add(padraoCuritiba ? fundosAjustados ? "FUNDEP (valor ajustado)" : "FUNDEP (5% sobre emolumentos)" : "Outros fundos e taxas do cartório (sem FUNREJUS)", 0, 0, fundosPR);
     selos = selosPR;
     fundos = fundosPR;
     if (selos === null) pendencias.push("Selos de fiscalização");
     if (fundos === null) pendencias.push("Fundos e taxas do cartório");
+    if (funrejusPR === null) pendencias.push(padraoCuritiba ? "FUNREJUS: atualizar UPF/PR do mês ou informar a guia" : "FUNREJUS");
   }
-  const subtotal = emolumentos + (selos ?? 0) + (fundos ?? 0);
+  const funrejus = uf === "PR" ? funrejusPR : 0;
+  const subtotal = emolumentos + (selos ?? 0) + (fundos ?? 0) + taxaJudiciaria + (padraoCuritiba ? 0 : funrejus ?? 0);
   const iss = issPercentual === null ? null : Math.round(emolumentos * issPercentual / 100);
   if (iss === null) pendencias.push("ISS do registro");
-  const total = subtotal + (iss ?? 0);
+  const total = subtotal + (iss ?? 0) + (padraoCuritiba ? funrejus ?? 0 : 0);
   if (!Number.isSafeInteger(total)) throw new Error("O total do registro excede o limite de cálculo.");
   return { total, compra, garantia, base, divida, desconto, processamento, prenotacao, emolumentos, selos,
-    subtotal, iss, issPercentual, linhas, pendencias, completo: pendencias.length === 0,
+    subtotal, iss, issPercentual, funrejus, fundos, arquivamento, taxaJudiciaria, padraoCuritiba, referenciaRIB, tetoFunrejus, linhas, pendencias, completo: pendencias.length === 0,
     motivo: pendencias.length ? `Registro parcial. Pendente: ${pendencias.join(", ")}.` : "Registro estimado com despesas calculadas.", tabela: table };
 }
 
@@ -225,9 +274,9 @@ const cities = {
 };
 const expenseNames = { itbi: "ITBI informado", registro: "Registro", taxa: "Taxa bancária", despachante: "Despachante" };
 const moneyIds = ["compra", "financiado", "fgts", "subsidio", ...Object.keys(expenseNames)];
-const registrationMoneyIds = ["registro-selo-compra", "registro-selo-garantia", "registro-selos-pr", "registro-fundos-pr"];
-const registrationIds = ["registro-modo", "registro-contrato", "registro-sfh", "registro-iss", ...registrationMoneyIds];
-const itbiIds = ["itbi-modo", "itbi-venal", "itbi-enquadramento"];
+const registrationMoneyIds = ["registro-selo-compra", "registro-selo-garantia", "registro-selos-pr", "registro-fundos-pr", "registro-funrejus-pr", "registro-emol-compra-pr", "registro-emol-garantia-pr"];
+const registrationIds = ["registro-modo", "registro-contrato", "registro-sfh", "registro-iss", "registro-referencia-pr", ...registrationMoneyIds];
+const itbiIds = ["itbi-modo", "itbi-venal"];
 const currencyFieldIds = [...moneyIds, ...registrationMoneyIds, "itbi-venal"];
 const allIds = ["uf", "municipio", "banco", "modalidade", ...moneyIds, ...registrationIds, ...itbiIds];
 const currency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -313,7 +362,6 @@ function updateITBI(strict = false) {
   get("itbi").readOnly = automatic;
   get("itbi-curitiba").hidden = !automatic || !curitiba;
   get("itbi-venal").disabled = !automatic || !curitiba;
-  get("itbi-enquadramento").disabled = !automatic || !curitiba;
   get("itbi-label").textContent = automatic ? "ITBI estimado (R$)" : "ITBI informado (R$)";
   get("metric-itbi-label").textContent = automatic ? "ITBI estimado" : "ITBI informado";
   get("metric-itbi-nota").textContent = automatic ? "Padrão do município" : "Valor informado manualmente";
@@ -325,7 +373,6 @@ function updateITBI(strict = false) {
     return;
   }
   try {
-    const condition = get("itbi-enquadramento").value;
     const venal = curitiba ? readCents("itbi-venal") : null;
     if (venal !== null && venal <= 0) throw { id: "itbi-venal", message: "O valor venal deve ser maior que zero." };
     const operation = Object.fromEntries(["compra", "financiado", "fgts", "subsidio"].map((id) => [id, readCents(id)]));
@@ -336,8 +383,7 @@ function updateITBI(strict = false) {
     }
     itbiEstimate = calcularITBI({ uf: get("uf").value, municipio: get("municipio").value,
       ...operation,
-      valorVenal: venal,
-      enquadramento: condition === "sim" ? true : condition === "nao" ? false : null });
+      valorVenal: venal });
     setMoneyValue("itbi", itbiEstimate.total);
     get("itbi-status").textContent = itbiEstimate.motivo;
   } catch (issue) {
@@ -345,7 +391,7 @@ function updateITBI(strict = false) {
     get("itbi").value = "";
     get("itbi-status").textContent = issue.message;
     if (strict) {
-      if (!issue.id) issue.id = curitiba ? "itbi-enquadramento" : "financiado";
+      if (!issue.id) issue.id = curitiba ? "itbi-venal" : "financiado";
       throw issue;
     }
   }
@@ -400,7 +446,7 @@ function renderAudits(values, partialRegistration) {
     itbiRows.push(["Recursos próprios", formatMoney(itbiEstimate.proprios ?? null)]);
     itbiRows.push([itbiEstimate.profile ? "Subsídio excluído da base" : "Subsídio na operação", formatMoney(values.subsidio)]);
     if (itbiEstimate.profile) itbiRows.push(["Limite combinado de financiamento + FGTS", itbiEstimate.profile.limite === null ? "Sem limitador" : formatMoney(itbiEstimate.profile.limite)]);
-    else itbiRows.push(["Enquadramento reduzido de Curitiba", {sim:"Condições confirmadas",nao:"Não atende às condições"}[get("itbi-enquadramento").value] || "Pendente de confirmação"]);
+    else itbiRows.push(["Critério de Curitiba", "Faixas automáticas do padrão RTx, sem confirmação"]);
   }
   renderRows("itbi-auditoria", itbiRows);
   renderITBI();
@@ -442,21 +488,26 @@ function registrationData() {
   if (base !== null && divida !== null && divida > base) throw { id: "financiado", message: "O financiamento não pode superar o valor do imóvel." };
   if (issPercentual !== null && issPercentual > 10000) throw { id: "registro-iss", message: "O percentual de ISS deve estar entre 0 e 100." };
   if (get("registro-sfh").checked && divida === 0) throw { id: "registro-sfh", message: "1ª aquisição SFH exige financiamento. Confira o enquadramento da operação." };
-  return calcularRegistro({ uf: get("uf").value, base, divida,
+  return calcularRegistro({ uf: get("uf").value, municipio: get("municipio").value, base, divida,
+    referenciaPR: get("registro-referencia-pr").value || "rib",
     sfh: get("registro-sfh").checked,
     issPercentual: issPercentual === null ? null : issPercentual / 100,
     seloCompra: get("uf").value === "RS" ? readCents("registro-selo-compra") : null,
     seloGarantia: get("uf").value === "RS" && divida > 0 ? readCents("registro-selo-garantia") : null,
     selosPR: get("uf").value === "PR" ? readCents("registro-selos-pr") : null,
     fundosPR: get("uf").value === "PR" ? readCents("registro-fundos-pr") : null,
+    funrejusPR: get("uf").value === "PR" ? readCents("registro-funrejus-pr") : null,
+    emolCompraPR: get("uf").value === "PR" ? readCents("registro-emol-compra-pr") : null,
+    emolGarantiaPR: get("uf").value === "PR" && divida > 0 ? readCents("registro-emol-garantia-pr") : null,
     contrato: get("registro-contrato").value });
 }
 
 function resetMunicipalRegistration() {
   const key = `${get("uf").value}/${get("municipio").value}`;
-  const percentage = ISS_INFORMADO[key];
+  const percentage = key === "PR/Curitiba" ? CURITIBA_REGISTRO.iss : ISS_INFORMADO[key];
   get("registro-iss").value = percentage === undefined ? "" : String(percentage);
   registrationMoneyIds.forEach((id) => { get(id).value = ""; });
+  get("registro-referencia-pr").value = "rib";
 }
 
 function updateRegistration(strict = false) {
@@ -468,13 +519,18 @@ function updateRegistration(strict = false) {
   get("registro-sfh").disabled = !automatic;
   get("registro-ajustes-rs").hidden = get("uf").value !== "RS";
   get("registro-ajustes-pr").hidden = get("uf").value !== "PR";
+  get("registro-fontes-pr").hidden = get("uf").value !== "PR" || get("municipio").value !== "Curitiba";
   [...registrationMoneyIds, "registro-iss"].forEach((id) => { get(id).disabled = !automatic; });
+  get("registro-referencia-pr").disabled = !automatic;
   const rate = get("registro-iss").valueAsNumber;
-  get("registro-iss-nota").textContent = get("registro-iss").value.trim() === ""
+  const curitiba = get("uf").value === "PR" && get("municipio").value === "Curitiba";
+  get("registro-iss-nota").textContent = curitiba
+    ? `Curitiba: ISS estimado de 5% conforme a referência da calculadora enviada pela RTx, não alíquota municipal certificada. ${get("registro-iss").value.trim() === "" ? "Campo vazio usa o padrão." : "Percentual considerado: " + rate.toLocaleString("pt-BR") + "%."} Confirme o repasse com o cartório.`
+    : get("registro-iss").value.trim() === ""
     ? "ISS pendente de confirmação para este município. Informe o percentual efetivamente repassado pelo cartório; 0 somente se não houver cobrança."
     : `${get("municipio").value}: percentual efetivo de repasse de ${Number.isFinite(rate) ? rate.toLocaleString("pt-BR") : "valor inválido"}% informado para esta simulação. Confirme com o cartório; não é uma alíquota municipal cadastrada.`;
   const table = REGISTRO_TABELAS[get("uf").value];
-  get("registro-fonte").href = table.fonte;
+  get("registro-fonte").href = get("uf").value === "PR" && get("registro-referencia-pr").value === "rib" ? REGISTRO_REFERENCIA_RIB.fonte : table.fonte;
   if (!automatic) {
     registrationEstimate = null;
     get("registro-status").textContent = "Valor do registro informado manualmente pelo cartório.";
@@ -488,7 +544,7 @@ function updateRegistration(strict = false) {
     registrationEstimate = null;
     get("registro").value = "";
     get("registro-status").textContent = issue.message;
-    if (strict) throw issue;
+    if (strict) { if (!issue.id) issue.id = "registro-referencia-pr"; throw issue; }
   }
 }
 
@@ -496,6 +552,10 @@ function renderRegistration() {
   get("registro-detalhes").hidden = !registrationEstimate;
   if (!registrationEstimate) return;
   const estimate = registrationEstimate;
+  const detailedPR = Boolean(estimate.padraoCuritiba);
+  ["registro-fundep-col", "registro-taxa-col", "registro-fundep-total", "registro-taxa-total", "registro-funrejus-row"].forEach((id) => { get(id).hidden = !detailedPR; });
+  get("registro-tabela").className = detailedPR ? "registration-table detailed-pr" : "registration-table";
+  ["registro-iss-label", "registro-total-label"].forEach((id) => { get(id).setAttribute("colspan", detailedPR ? "5" : "3"); });
   get("registro-bases").textContent = `Valor do imóvel: ${formatMoney(readCents("compra"))}. Valor financiado: ${formatMoney(readCents("financiado"))}.`;
   get("registro-linhas").replaceChildren(...estimate.linhas.map((line) => {
     const row = document.createElement("tr");
@@ -503,7 +563,8 @@ function renderRegistration() {
     description.scope = "row";
     description.textContent = line.descricao;
     row.append(description);
-    [line.emolumento, line.selo, line.subtotal].forEach((value, index) => {
+    const columns = detailedPR ? [line.emolumento, line.fundep, line.selo, line.taxa, line.subtotal] : [line.emolumento, line.selo, line.subtotal];
+    columns.forEach((value, index) => {
       const cell = document.createElement("td");
       cell.textContent = line.agrupado && index === 1 ? "Total abaixo" : formatMoney(value);
       if (value === null && !line.agrupado) cell.className = "pending";
@@ -514,6 +575,10 @@ function renderRegistration() {
   get("registro-emol-total").textContent = formatMoney(estimate.emolumentos ?? null);
   get("registro-selo-total").textContent = formatMoney(estimate.selos ?? null);
   get("registro-subtotal").textContent = formatMoney(estimate.subtotal ?? null);
+  get("registro-fundep-total").textContent = formatMoney(estimate.fundos ?? null);
+  get("registro-taxa-total").textContent = formatMoney(estimate.taxaJudiciaria ?? null);
+  get("registro-funrejus-label").textContent = `FUNREJUS (0,2% sobre ${formatMoney(estimate.base ?? null)}, com teto; ou valor ajustado)`;
+  get("registro-funrejus-total").textContent = formatMoney(estimate.funrejus ?? null);
   get("registro-iss-label").textContent = estimate.issPercentual === undefined || estimate.issPercentual === null
     ? "ISS (pendente)" : `ISS estimado (${estimate.issPercentual.toLocaleString("pt-BR")}% sobre ${formatMoney(estimate.emolumentos)})`;
   get("registro-iss-total").textContent = formatMoney(estimate.iss ?? null);
@@ -521,7 +586,8 @@ function renderRegistration() {
   get("registro-total").textContent = formatMoney(estimate.total);
   const benefit = estimate.desconto ? "1ª aquisição SFH: redução de 50% nos emolumentos, condicionada à confirmação do enquadramento. Selos não foram reduzidos automaticamente."
     : "Sem benefício selecionado.";
-  get("registro-observacao").textContent = `${estimate.motivo} ${benefit} ${get("registro-iss-nota").textContent} Base estimada pelo valor de compra; a avaliação fiscal ou o contrato podem exigir outro valor. ${estimate.tabela.versao}. Revisada em ${estimate.tabela.revisadoEm}; revisar até ${estimate.tabela.revisarAte}.`;
+  const curitibaNote = estimate.padraoCuritiba ? ` ${estimate.referenciaRIB ? "Referência RIB: emolumento da garantia = 50% do emolumento da compra; não é a Tabela XIII cadastrada." : "Tabela XIII TJPR: garantia calculada pela faixa da dívida."} Uma prenotação e um arquivamento; selos por ato; FUNDEP 5% por ato; taxa judiciária 25% nos dois atos menores. FUNREJUS 0,2% sobre a compra, sem presumir isenção. Teto de 53 UPF/PR no mês: ${formatMoney(estimate.tetoFunrejus)}. O site RIB informa UPF de abril/2024; o projeto usa o mês cadastrado atual. Ajustes substituem o padrão; atos adicionais não incluídos.` : "";
+  get("registro-observacao").textContent = `${estimate.motivo} ${benefit} ${get("registro-iss-nota").textContent} Base estimada pelo valor de compra; a avaliação fiscal ou o contrato podem exigir outro valor. ${estimate.tabela.versao}. Revisada em ${estimate.tabela.revisadoEm}; revisar até ${estimate.tabela.revisarAte}.${curitibaNote}`;
   get("registro-selo-fonte-wrap").hidden = get("uf").value !== "RS";
   get("registro-fonte-resumo").href = estimate.tabela.fonte;
   get("registro-fonte-resumo").textContent = `Fonte: ${estimate.tabela.versao}`;
@@ -725,7 +791,6 @@ form.addEventListener("change", (event) => {
     resetMunicipalRegistration();
     manualITBIValue = "";
     get("itbi").value = "";
-    get("itbi-enquadramento").value = "";
     get("itbi-venal").value = "";
   }
   if (event.target.id === "banco") updateModalities();
