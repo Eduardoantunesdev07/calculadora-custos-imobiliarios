@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Estimador de custos da aquisição imobiliária | RTx</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-logo"><img src="logo-rtx.jpeg" alt="RTx - Assessoria em crédito imobiliário" width="152" height="84"></div>
+        <div><p class="eyebrow">RTX · ASSESSORIA EM CRÉDITO IMOBILIÁRIO</p><h1>Estimador de custos da aquisição imobiliária</h1></div>
+      </div>
+      <button id="imprimir" type="button" class="secondary print-button" disabled>Imprimir / PDF</button>
+    </header>
+
+    <div class="metrics" aria-label="Resumo das despesas" aria-live="polite">
+      <article class="metric"><h2 id="metric-itbi-label">ITBI estimado</h2><p id="metric-itbi">Pendente</p><span id="metric-itbi-nota">Padrão do município</span></article>
+      <article class="metric"><h2>Registro</h2><p id="metric-registro">Pendente</p><span id="metric-registro-nota">Estimativa do cartório</span></article>
+      <article class="metric"><h2>Taxa bancária</h2><p id="metric-taxa">Pendente</p><span>Conforme banco e modalidade</span></article>
+      <article class="metric"><h2>Despachante</h2><p id="metric-despachante">Pendente</p><span>Valor da operação</span></article>
+      <article class="metric metric-total"><h2 id="metric-total-label">Total estimado</h2><p id="metric-total">Pendente</p><span id="metric-situacao">Aguardando cálculo</span></article>
+    </div>
+
+    <form id="estimador" class="simulator" novalidate>
+      <aside class="editor" aria-labelledby="dados-titulo">
+        <div class="section-heading"><span class="section-index">01</span><h2 id="dados-titulo">Dados da operação</h2></div>
+        <div class="field-grid">
+          <div class="field"><label for="uf">Estado</label><select id="uf" required><option value="RS">RS</option><option value="PR">PR</option></select></div>
+          <div class="field"><label for="municipio">Município</label><select id="municipio" required></select></div>
+          <div class="field"><label for="compra">Valor de compra (R$)</label><input id="compra" type="number" inputmode="decimal" min="0.01" step="0.01" required></div>
+          <div class="field"><label for="financiado">Financiado pelo banco (R$)</label><input id="financiado" type="number" inputmode="decimal" min="0" step="0.01" required></div>
+          <div class="field"><label for="fgts">FGTS utilizado (R$)</label><input id="fgts" type="number" inputmode="decimal" min="0" step="0.01" required></div>
+          <div class="field"><label for="subsidio">Subsídio (R$)</label><input id="subsidio" type="number" inputmode="decimal" min="0" step="0.01" required></div>
+          <div class="field"><label for="banco">Banco</label><select id="banco" required><option value="">Selecione</option><option value="caixa">Caixa</option><option value="itau">Itaú</option><option value="santander">Santander</option><option value="bradesco">Bradesco</option></select></div>
+          <div class="field"><label for="modalidade">Modalidade</label><select id="modalidade" required disabled><option value="">Selecione o banco</option></select></div>
+        </div>
+        <div class="form-actions"><p id="erro" class="error" role="alert" hidden></p><button type="submit">Calcular estimativa</button></div>
+      </aside>
+
+      <div class="workspace">
+        <nav class="tab-nav" role="tablist" aria-label="Conferência dos custos">
+          <button id="tab-resumo" type="button" role="tab" aria-controls="pane-resumo" aria-selected="true">Resumo</button>
+          <button id="tab-itbi" type="button" role="tab" aria-controls="pane-itbi" aria-selected="false" tabindex="-1">ITBI</button>
+          <button id="tab-registro" type="button" role="tab" aria-controls="pane-registro" aria-selected="false" tabindex="-1">Registro</button>
+          <button id="tab-taxas" type="button" role="tab" aria-controls="pane-taxas" aria-selected="false" tabindex="-1">Taxas e despachante</button>
+        </nav>
+
+        <section id="pane-resumo" class="tab-panel results" role="tabpanel" aria-labelledby="tab-resumo" tabindex="0">
+          <div class="section-heading"><span class="section-index">02</span><h2 id="resultado-titulo">Resumo da aquisição</h2></div>
+          <p id="estado" class="status" role="status">Aguardando cálculo.</p>
+          <div id="resultado" hidden aria-live="polite">
+            <div class="summary-heading"><div><p id="local-resumo" class="location"></p><p class="note">Data: <time id="data-resumo"></time></p></div><p id="situacao" class="badge"></p></div>
+            <dl id="impressao-operacao" class="print-only"></dl>
+            <div class="summary-columns">
+              <section class="summary-block operation-summary"><h3>Dados da operação</h3><dl id="operacao-resumo"></dl></section>
+              <section class="summary-block"><h3><span class="screen-only">Despesas da aquisição</span><span class="print-only">Resumo de custos</span></h3><dl id="despesas-resumo"></dl><div class="total-row"><p id="total-label"></p><p id="total" class="payment"></p></div></section>
+            </div>
+            <p id="pendencias" class="note pending"></p>
+            <p id="taxa-resumo" class="note"></p>
+            <p class="confirmation">Os valores estão sujeitos à confirmação pelo banco, município, cartório e demais responsáveis.</p>
+          </div>
+        </section>
+
+        <section id="pane-itbi" class="tab-panel" role="tabpanel" aria-labelledby="tab-itbi" tabindex="0" hidden>
+          <div class="section-heading"><span class="section-index">02</span><h2>ITBI</h2><span id="itbi-origem-tag" class="tag">Padrão do município</span></div>
+          <div class="print-controls">
+            <div class="field-grid"><div class="field"><label for="itbi-modo">Cálculo do ITBI</label><select id="itbi-modo"><option value="automatico">Padrão do município</option><option value="manual">Valor informado manualmente</option></select></div><div class="field"><label id="itbi-label" for="itbi">ITBI estimado (R$)</label><input id="itbi" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Pendente" readonly aria-describedby="itbi-status"></div></div>
+            <div id="itbi-curitiba" hidden>
+              <div class="field-grid"><div class="field"><label for="itbi-enquadramento">Condições da alíquota reduzida</label><select id="itbi-enquadramento"><option value="">Confirmação pendente</option><option value="sim">Atende às condições</option><option value="nao">Não atende às condições</option></select></div><div class="field"><label for="itbi-venal">Valor venal informado (R$), opcional</label><input id="itbi-venal" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="Valor de compra como referência"></div></div>
+              <p class="note">Curitiba: imóvel residencial edificado, financiamento de pelo menos 10 anos e garantia hipotecária ou alienação fiduciária. A alíquota incide sobre o valor venal inteiro; sem valor venal informado, a estimativa usa o valor de compra como referência.</p>
+            </div>
+            <p id="itbi-status" class="note" role="status"></p>
+          </div>
+          <div id="analise-itbi" hidden><h3>Conferência do ITBI</h3><dl id="itbi-auditoria" class="audit-list"></dl></div>
+          <section id="itbi-detalhes" class="registration-breakdown" hidden aria-labelledby="itbi-detalhes-titulo">
+            <h3 id="itbi-detalhes-titulo">Composição do ITBI</h3>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Bases e alíquotas do ITBI"><table class="registration-table"><caption class="sr-only">Detalhamento das bases de cálculo do ITBI</caption><thead><tr><th scope="col">Descrição</th><th scope="col">Base de cálculo</th><th scope="col">Alíquota</th><th scope="col">ITBI</th></tr></thead><tbody id="itbi-linhas"></tbody><tfoot><tr class="registry-total"><th scope="row" colspan="3">ITBI estimado</th><td id="itbi-total"></td></tr></tfoot></table></div>
+            <p id="itbi-observacao" class="note"></p><p id="itbi-fonte-wrap" class="note" hidden><a id="itbi-fonte" target="_blank" rel="noopener noreferrer">Curitiba: Lei Complementar 148/2025</a></p>
+          </section>
+          <p class="note audit-empty" id="itbi-aguardando">Conferência pendente de cálculo.</p>
+        </section>
+
+        <section id="pane-registro" class="tab-panel" role="tabpanel" aria-labelledby="tab-registro" tabindex="0" hidden>
+          <div class="section-heading"><span class="section-index">02</span><h2>Registro do imóvel</h2><span class="tag">Emolumentos e selos</span></div>
+          <div class="print-controls">
+            <div class="registry-options">
+              <div class="field"><label for="registro-contrato">Tipo de contrato</label><select id="registro-contrato"><option value="urbano">Compra e venda / alienação fiduciária</option><option value="outro">Outros atos ou mais de um imóvel</option></select></div>
+              <fieldset id="registro-beneficios" class="benefits"><legend>Desconto</legend><label class="check-label" for="registro-sfh"><input id="registro-sfh" type="checkbox">1ª aquisição SFH</label><p class="note">Enquadramento sujeito à confirmação.</p></fieldset>
+            </div>
+            <div class="input-band"><div class="field"><label id="registro-label" for="registro">Registro estimado (R$)</label><input id="registro" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Pendente" readonly aria-describedby="registro-status"></div><div><p id="registro-status" class="note" role="status"></p><a class="consult" href="https://www.registrodeimoveis.org.br/calculadora" target="_blank" rel="noopener noreferrer">Consultar registro <span aria-hidden="true">↗</span><span class="sr-only"> (abre em outra aba)</span></a></div></div>
+            <details id="registro-ajustes" class="adjustments"><summary>Ajustes do registro</summary>
+              <div class="field"><label for="registro-modo">Cálculo do registro</label><select id="registro-modo"><option value="automatico">Tabela oficial local</option><option value="manual">Valor informado pelo cartório</option></select></div>
+              <div id="registro-parametros">
+                <div class="field"><label for="registro-iss">ISS estimado sobre os emolumentos (%)</label><input id="registro-iss" type="number" inputmode="decimal" min="0" max="100" step="0.01" placeholder="Pendente" aria-describedby="registro-iss-nota"></div><p id="registro-iss-nota" class="note"></p>
+                <div id="registro-ajustes-rs" class="field-grid"><div class="field"><label for="registro-selo-compra">Selo da compra ajustado (R$)</label><input id="registro-selo-compra" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Tabela oficial"></div><div class="field"><label for="registro-selo-garantia">Selo da garantia ajustado (R$)</label><input id="registro-selo-garantia" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Tabela oficial"></div></div>
+                <div id="registro-ajustes-pr" class="field-grid" hidden><div class="field"><label for="registro-selos-pr">Selos de fiscalização (R$)</label><input id="registro-selos-pr" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Pendente"></div><div class="field"><label for="registro-fundos-pr">Fundos e taxas do cartório (R$)</label><input id="registro-fundos-pr" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Pendente"></div></div>
+                <p class="note">Valores ajustados devem ser confirmados pelo cartório. Campos de selo ajustado vazios usam a tabela do RS; valores não conhecidos no PR permanecem pendentes.</p>
+              </div>
+            </details>
+            <p class="note"><a id="registro-fonte" target="_blank" rel="noopener noreferrer">Tabela oficial do estado</a></p>
+          </div>
+          <section id="registro-detalhes" class="registration-breakdown" hidden aria-labelledby="registro-detalhes-titulo">
+            <h3 id="registro-detalhes-titulo">Detalhamento do registro</h3><p id="registro-bases" class="note"></p>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Detalhamento dos custos do registro"><table class="registration-table">
+              <caption class="sr-only">Emolumentos, selos e custos estimados do registro</caption>
+              <thead><tr><th scope="col">Descrição</th><th scope="col">Emolumento</th><th scope="col">Selo de fiscalização</th><th scope="col">Subtotal</th></tr></thead>
+              <tbody id="registro-linhas"></tbody>
+              <tfoot><tr class="subtotals"><th scope="row">Subtotais</th><td id="registro-emol-total"></td><td id="registro-selo-total"></td><td id="registro-subtotal"></td></tr><tr><th id="registro-iss-label" scope="row" colspan="3">ISS</th><td id="registro-iss-total"></td></tr><tr class="registry-total"><th id="registro-total-label" scope="row" colspan="3">Total estimado do registro</th><td id="registro-total"></td></tr></tfoot>
+            </table></div>
+            <p id="registro-observacao" class="note"></p><p class="note"><a id="registro-fonte-resumo" target="_blank" rel="noopener noreferrer">Fonte da tabela de registro</a> <span id="registro-selo-fonte-wrap">· <a href="https://colegioregistralrs.org.br/img/midias/08038-3-4.pdf" target="_blank" rel="noopener noreferrer">Tabela de selos RS 2026</a></span></p>
+          </section>
+          <p id="registro-aguardando" class="note audit-empty">Detalhamento pendente de cálculo.</p>
+          <div id="analise-registro-manual" hidden><h3>Registro informado pelo cartório</h3><dl id="registro-manual-auditoria" class="audit-list"></dl></div>
+        </section>
+
+        <section id="pane-taxas" class="tab-panel" role="tabpanel" aria-labelledby="tab-taxas" tabindex="0" hidden>
+          <div class="section-heading"><span class="section-index">02</span><h2>Taxas e despachante</h2></div>
+          <div class="print-controls">
+            <div class="field-grid"><div class="field"><label for="taxa">Taxa bancária (R$)</label><input id="taxa" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Pendente" aria-describedby="criterio-taxa"></div><div class="field"><label for="despachante">Despachante (R$)</label><input id="despachante" type="number" inputmode="decimal" min="0" step="0.01" value="1200"></div></div>
+            <p id="criterio-taxa" class="note">Taxa bancária pendente de seleção do banco.</p><button id="restaurar-taxa" class="secondary compact-button" type="button">Restaurar taxa sugerida</button>
+          </div>
+          <div id="analise-taxas" class="summary-columns" hidden><section class="summary-block"><h3>Conferência da taxa bancária</h3><dl id="taxas-auditoria"></dl></section><section class="summary-block"><h3>Conferência do despachante</h3><dl id="despachante-auditoria"></dl></section></div>
+          <p id="taxas-aguardando" class="note audit-empty">Conferência pendente de cálculo.</p>
+        </section>
+      </div>
+    </form>
+    <footer>Estimativa das despesas informadas da aquisição. Não inclui o preço do imóvel nem as parcelas do financiamento. Parâmetros bancários fornecidos para esta estimativa.</footer>
+    <noscript>Ative o JavaScript no navegador para calcular a estimativa.</noscript>
+  </main>
+</body>
+</html>
