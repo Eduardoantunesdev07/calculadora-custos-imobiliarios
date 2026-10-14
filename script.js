@@ -268,6 +268,7 @@ if (typeof document !== "undefined") {
 const get = (id) => document.getElementById(id);
 const form = get("estimador");
 const error = get("erro");
+const THEME_STORAGE_KEY = "rtx-theme";
 const cities = {
   RS: ["Porto Alegre", "Canoas", "São Leopoldo", "Novo Hamburgo", "Alvorada"],
   PR: ["Curitiba"]
@@ -291,6 +292,49 @@ const fieldTabs = {
   ...Object.fromEntries(registrationIds.map((id) => [id, "registro"])),
   ...Object.fromEntries(itbiIds.map((id) => [id, "itbi"]))
 };
+
+function storedTheme() {
+  try {
+    const theme = localStorage.getItem(THEME_STORAGE_KEY);
+    return theme === "light" || theme === "dark" ? theme : null;
+  } catch {
+    return null;
+  }
+}
+
+function preferredTheme() {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function applyTheme(theme, persist = true) {
+  const nextTheme = theme === "light" ? "light" : "dark";
+  if (document.documentElement) document.documentElement.dataset.theme = nextTheme;
+  const toggle = get("theme-toggle");
+  const label = get("theme-toggle-label");
+  if (toggle && label) {
+    const light = nextTheme === "light";
+    toggle.setAttribute("aria-pressed", String(light));
+    label.textContent = light ? "Tema escuro" : "Tema claro";
+    toggle.title = light ? "Alternar para tema escuro" : "Alternar para tema claro";
+  }
+  if (persist) {
+    try { localStorage.setItem(THEME_STORAGE_KEY, nextTheme); } catch { /* Preferencia visual opcional. */ }
+  }
+}
+
+function initializeTheme() {
+  const rootTheme = document.documentElement?.dataset.theme;
+  applyTheme(storedTheme() || rootTheme || preferredTheme(), false);
+  get("theme-toggle")?.addEventListener("click", () => {
+    const currentTheme = document.documentElement?.dataset.theme || preferredTheme();
+    applyTheme(currentTheme === "light" ? "dark" : "light");
+  });
+  if (typeof window.matchMedia === "function") {
+    window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", (event) => {
+      if (!storedTheme()) applyTheme(event.matches ? "light" : "dark", false);
+    });
+  }
+}
 
 function setMoneyValue(id, cents) {
   get(id).value = formatMoneyInput(cents);
@@ -824,6 +868,7 @@ currencyFieldIds.forEach((id) => {
   field.removeAttribute("step");
   formatMoneyField(field);
 });
+initializeTheme();
 activateTab("resumo");
 updateCities();
 resetMunicipalRegistration();

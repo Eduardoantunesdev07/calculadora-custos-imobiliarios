@@ -4,6 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Estimador de custos da aquisição imobiliária | RTx</title>
+  <script>
+    (() => {
+      try {
+        const savedTheme = localStorage.getItem("rtx-theme");
+        const systemTheme = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        document.documentElement.dataset.theme = savedTheme || systemTheme;
+      } catch {
+        document.documentElement.dataset.theme = "dark";
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="style.css">
   <script src="script.js" defer></script>
 </head>
@@ -14,7 +25,13 @@
         <div class="brand-logo"><img src="logo-rtx.jpeg" alt="RTx - Assessoria em crédito imobiliário" width="152" height="84"></div>
         <div><p class="eyebrow">RTX · ASSESSORIA EM CRÉDITO IMOBILIÁRIO</p><h1>Estimador de custos da aquisição imobiliária</h1></div>
       </div>
-      <button id="imprimir" type="button" class="secondary print-button" disabled>Imprimir / PDF</button>
+      <div class="header-actions">
+        <button id="theme-toggle" type="button" class="secondary theme-toggle" aria-pressed="false">
+          <span aria-hidden="true" class="theme-toggle-icon"></span>
+          <span id="theme-toggle-label">Tema claro</span>
+        </button>
+        <button id="imprimir" type="button" class="secondary print-button" disabled>Imprimir / PDF</button>
+      </div>
     </header>
 
     <div class="metrics" aria-label="Resumo das despesas" aria-live="polite">
